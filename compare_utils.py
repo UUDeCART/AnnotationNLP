@@ -120,13 +120,13 @@ def docs_reader(project_dir):
     return doc_map, annotation_map
 
 
-def compare_projects(dir1: str, dir2: str, compare_method: str) -> dict:
+def compare_projects(dir1: str, dir2: str, compare_method: str, types=set()) -> dict:
     doc_map1, annotation_map1 = docs_reader(dir1)
     doc_map2, annotation_map2 = docs_reader(dir2)
-    return doc_map1, compare(annotation_map1, annotation_map2, compare_method)
+    return doc_map1, compare(annotation_map1, annotation_map2, compare_method, types)
 
 
-def compare(annotation_map1: dict, annotation_map2: dict, compare_method='relax') -> dict:
+def compare(annotation_map1: dict, annotation_map2: dict, compare_method='relax', types=set()) -> dict:
     """
     :param annotation_map1: a dictionary with doc_name as the key, an AnnotatedDocument as the value
     :param annotation_map2:a dictionary with doc_name as the key, an AnnotatedDocument as the value (of reference annotator)
@@ -137,26 +137,40 @@ def compare(annotation_map1: dict, annotation_map2: dict, compare_method='relax'
         raise ValueError("The two input datasets don't have a equal amount of documents.")
         return None
     evaluators = {}
+    # if you know the list of types that you will compare, you can set it up. Otherwise, it will go over all
+    #  the annotations to find all the types
+    if len(types) == 0:
+        for grouped_annotations in annotation_map1.values():
+            types.update(grouped_annotations.keys())
+        for grouped_annotations in annotation_map2.values():
+            types.update(grouped_annotations.keys())
     for doc_name, grouped_annotations in annotation_map1.items():
         if compare_method[0].lower().startswith('s'):
-            strict_compare_one_doc(evaluators, doc_name, grouped_annotations, annotation_map2[doc_name])
+            strict_compare_one_doc(evaluators, doc_name, grouped_annotations, annotation_map2[doc_name], sorted(types))
         else:
-            relax_compare_one_doc(evaluators, doc_name, grouped_annotations, annotation_map2[doc_name])
+            relax_compare_one_doc(evaluators, doc_name, grouped_annotations, annotation_map2[doc_name], sorted(types))
 
     return evaluators
 
 
 #  consider a match only when the annotations' spans exactly match (both start and end are equal)
 #  evaluator, annotations to be compared, reference annotations
-def strict_compare_one_doc(evaluators: Evaluator, doc_name: str, grouped_annotations1: [], grouped_annotations2: []):
-    for type_name, annos_list_of_one_type in grouped_annotations1.items():
+def strict_compare_one_doc(evaluators: Evaluator, doc_name: str, grouped_annotations1: [], grouped_annotations2: [],
+                           types):
+    for type_name in types:
         if type_name not in evaluators:
             evaluators[type_name] = Evaluator()
         evaluator = evaluators[type_name]
+        if type_name not in grouped_annotations1:
+            if type_name in grouped_annotations2:
+                evaluator.add_fn(len(grouped_annotations2[type_name]))
+                evaluator.append_fns(doc_name, grouped_annotations2[type_name])
+            continue
+        annos_list_of_one_type = grouped_annotations1[type_name]
 
         if type_name not in grouped_annotations2 or len(grouped_annotations2[type_name]) == 0:
             evaluator.add_fp(len(annos_list_of_one_type))
-            evaluator.append_fps(doc_name,annos_list_of_one_type)
+            evaluator.append_fps(doc_name, annos_list_of_one_type)
             continue
 
         annos1 = sorted(annos_list_of_one_type, key=lambda x: x.start_index)
@@ -206,15 +220,22 @@ def build_interval_tree(annos: []) -> IntervalTree:
     return t
 
 
-def relax_compare_one_doc(evaluators: Evaluator, doc_name: str, grouped_annotations1: [], grouped_annotations2: []):
-    for type_name, annos_list_of_one_type in grouped_annotations1.items():
+def relax_compare_one_doc(evaluators: Evaluator, doc_name: str, grouped_annotations1: [], grouped_annotations2: [],
+                          types):
+    for type_name in types:
         if type_name not in evaluators:
             evaluators[type_name] = Evaluator()
         evaluator = evaluators[type_name]
+        if type_name not in grouped_annotations1:
+            if type_name in grouped_annotations2:
+                evaluator.add_fn(len(grouped_annotations2[type_name]))
+                evaluator.append_fns(doc_name, grouped_annotations2[type_name])
+            continue
+        annos_list_of_one_type = grouped_annotations1[type_name]
 
         if type_name not in grouped_annotations2 or len(grouped_annotations2[type_name]) == 0:
             evaluator.add_fp(len(annos_list_of_one_type))
-            evaluator.append_fps(doc_name,annos_list_of_one_type)
+            evaluator.append_fps(doc_name, annos_list_of_one_type)
             continue
         # we use interval tree to find the overlapped annotations
         # you can try using a similar compare method used in the strict match, but the logic will be way more
@@ -287,6 +308,3 @@ def show_one_doc_annotations(doc_name, doc_text, annotations, annotator_a, annot
         html.append("<td style=\"text-align:left\">{0}</td>".format(cell))
         html.append("</tr>")
     return html
-
-
-
